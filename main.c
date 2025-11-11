@@ -1,0 +1,431 @@
+#define _CRT_SECURE_NO_WARNINGS
+#include <GL/glut.h>
+#include <GL/glu.h>
+#include <GL/gl.h>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <string.h>
+
+static float fov = 60.0f;
+static GLuint textureID;
+static float rotX = 0.0f;
+static float rotY = 0.0f;
+static int lastMouseX = 0;
+static int lastMouseY = 0;
+static int isDragging = 0;
+
+
+typedef struct {
+    float (*vertex)[3];
+    float (*texcoords)[2];
+    float (*normals)[3];
+    int (*faces)[9];
+    int vertexCount;
+    int texcoordCount;
+    int normalCount;
+    int faceCount;
+} Model;
+
+typedef struct {
+    GLfloat Ka[3];
+    GLfloat Kd[3];
+    GLfloat Ke[3];
+    GLfloat Ns;
+    int has_material;
+} Material;
+
+
+static Model model;
+static Material material;
+
+void freeModel(Model* model) {
+    free(model->vertex);
+    free(model->texcoords);
+    free(model->normals);
+    free(model->faces);
+}
+
+Model readModel(const char* filename) {
+    Model model = { 0 };
+    FILE* file = fopen(filename, "r");
+    if (!file) {
+        perror("Erro ao abrir arquivo OBJ");
+        exit(EXIT_FAILURE);
+    }
+
+    char line[256];
+    float max_abs_vertex = 0.0f;
+
+    while (fgets(line, sizeof(line), file)) {
+        line[strcspn(line, "\n")] = 0;
+
+        if (line[0] == '\0' || line[0] == '#')
+            continue;
+
+        if (strncmp(line, "v ", 2) == 0) {
+            void* tmp = realloc(model.vertex, (model.vertexCount + 1) * sizeof(*model.vertex));
+            if (!tmp) {
+                fprintf(stderr, "Erro de memória ao realocar vertices.\n");
+                freeModel(&model);
+                fclose(file);
+                exit(EXIT_FAILURE);
+            }
+            model.vertex = tmp;
+
+            float x, y, z;
+            sscanf(line, "v %f %f %f", &x, &y, &z);
+            model.vertex[model.vertexCount][0] = x;
+            model.vertex[model.vertexCount][1] = y;
+            model.vertex[model.vertexCount][2] = z;
+
+            float absmax = fmaxf(fabsf(x), fmaxf(fabsf(y), fabsf(z)));
+            if (absmax > max_abs_vertex) max_abs_vertex = absmax;
+
+            model.vertexCount++;
+        }
+
+        else if (strncmp(line, "vt ", 3) == 0) {
+            void* tmp = realloc(model.texcoords, (model.texcoordCount + 1) * sizeof(*model.texcoords));
+            if (!tmp) {
+                fprintf(stderr, "Erro de memória ao realocar coordenadas de textura.\n");
+                freeModel(&model);
+                fclose(file);
+                exit(EXIT_FAILURE);
+            }
+            model.texcoords = tmp;
+
+            float u, v;
+            sscanf(line, "vt %f %f", &u, &v);
+            model.texcoords[model.texcoordCount][0] = u;
+            model.texcoords[model.texcoordCount][1] = v;
+            model.texcoordCount++;
+        }
+
+        else if (strncmp(line, "vn ", 3) == 0) {
+            void* tmp = realloc(model.normals, (model.normalCount + 1) * sizeof(*model.normals));
+            if (!tmp) {
+                fprintf(stderr, "Erro de memória ao realocar normais.\n");
+                freeModel(&model);
+                fclose(file);
+                exit(EXIT_FAILURE);
+            }
+            model.normals = tmp;
+
+            float x, y, z;
+            sscanf(line, "vn %f %f %f", &x, &y, &z);
+            model.normals[model.normalCount][0] = x;
+            model.normals[model.normalCount][1] = y;
+            model.normals[model.normalCount][2] = z;
+            model.normalCount++;
+        }
+
+        else if (strncmp(line, "f ", 2) == 0) {
+            void* tmp = realloc(model.faces, (model.faceCount + 1) * sizeof(*model.faces));
+            if (!tmp) {
+                fprintf(stderr, "Erro de memória ao realocar faces.\n");
+                freeModel(&model);
+                fclose(file);
+                exit(EXIT_FAILURE);
+            }
+            model.faces = tmp;
+
+            int v[3] = { 0 }, vt[3] = { 0 }, vn[3] = { 0 };
+            int matches = sscanf(line, "f %d/%d/%d %d/%d/%d %d/%d/%d",
+                &v[0], &vt[0], &vn[0],
+                &v[1], &vt[1], &vn[1],
+                &v[2], &vt[2], &vn[2]);
+
+            if (matches == 9) {
+                for (int i = 0; i < 3; i++) {
+                    model.faces[model.faceCount][i * 3 + 0] = v[i];
+                    model.faces[model.faceCount][i * 3 + 1] = vt[i];
+                    model.faces[model.faceCount][i * 3 + 2] = vn[i];
+                }
+            }
+            else {
+                matches = sscanf(line, "f %d//%d %d//%d %d//%d",
+                    &v[0], &vn[0],
+                    &v[1], &vn[1],
+                    &v[2], &vn[2]);
+
+                if (matches == 6) {
+                    for (int i = 0; i < 3; i++) {
+                        model.faces[model.faceCount][i * 3 + 0] = v[i];
+                        model.faces[model.faceCount][i * 3 + 1] = 0;
+                        model.faces[model.faceCount][i * 3 + 2] = vn[i];
+                    }
+                }
+            }
+
+            model.faceCount++;
+        }
+    }
+
+    fclose(file);
+
+    if (max_abs_vertex > 50.0f) {
+        float scale = 1.0f / 50.0f;
+        printf("Normalizando escala (dividindo vertices por 50)\n");
+        for (int i = 0; i < model.vertexCount; i++) {
+            model.vertex[i][0] *= scale;
+            model.vertex[i][1] *= scale;
+            model.vertex[i][2] *= scale;
+        }
+    }
+
+    return model;
+}
+
+Material readMTL(const char* filepath) {
+    Material mat = { .Ka = {1, 1, 1}, .Kd = {1, 1, 1}, .Ke = {0, 0, 0}, .Ns = 32.0f, .has_material = 0 };
+
+    FILE* file = fopen(filepath, "r");
+    if (!file) {
+        fprintf(stderr, "Aviso: arquivo MTL não encontrado: %s\n", filepath);
+        return mat;
+    }
+
+    char line[256];
+    mat.has_material = 1;
+
+    while (fgets(line, sizeof(line), file)) {
+        if (strncmp(line, "Ka ", 3) == 0) {
+            sscanf(line, "Ka %f %f %f", &mat.Ka[0], &mat.Ka[1], &mat.Ka[2]);
+        }
+        else if (strncmp(line, "Kd ", 3) == 0) {
+            sscanf(line, "Kd %f %f %f", &mat.Kd[0], &mat.Kd[1], &mat.Kd[2]);
+        }
+        else if (strncmp(line, "Ke ", 3) == 0) {
+            sscanf(line, "Ke %f %f %f", &mat.Ke[0], &mat.Ke[1], &mat.Ke[2]);
+        }
+        else if (strncmp(line, "Ns ", 3) == 0) {
+            sscanf(line, "Ns %f", &mat.Ns);
+        }
+        else if (strncmp(line, "Tr ", 3) == 0) {
+            float transparency;
+            sscanf(line, "Tr %f", &transparency);
+        }
+    }
+
+    fclose(file);
+    return mat;
+}
+
+void reshape(int w, int h) {
+    glViewport(0, 0, w, h);
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    float aspect = (float)w / (float)h;
+    gluPerspective(fov, aspect, 1.0, 50.0);
+    glMatrixMode(GL_MODELVIEW);
+}
+
+void display(void) {
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glLoadIdentity();
+
+    GLfloat light_diffuse[] = { 1.0, 1.0, 1.0, 1.0 };
+    GLfloat light_specular[] = { 1.0, 1.0, 1.0, 1.0 };
+    GLfloat light_position[] = { 1.0, 1.0, 1.0, 0.0 };
+
+    glLightfv(GL_LIGHT0, GL_DIFFUSE, light_diffuse);
+    glLightfv(GL_LIGHT0, GL_SPECULAR, light_specular);
+    glLightfv(GL_LIGHT0, GL_POSITION, light_position);
+
+    GLfloat mat_diffuse[] = { 1.0, 1.0, 1.0, 1.0 };
+    GLfloat mat_specular[] = { 1.0, 1.0, 1.0, 1.0 };
+    GLfloat mat_shininess[] = { 50.0 };
+
+    glMaterialfv(GL_FRONT, GL_DIFFUSE, mat_diffuse);
+    glMaterialfv(GL_FRONT, GL_SPECULAR, mat_specular);
+    glMaterialfv(GL_FRONT, GL_SHININESS, mat_shininess);
+
+    glTranslatef(0.0f, -0.5f, -2.5f);
+
+    glRotatef(rotX, 1.0f, 0.0f, 0.0f);
+    glRotatef(rotY, 0.0f, 1.0f, 0.0f);
+
+    glColor3f(1.0f, 1.0f, 1.0f);
+
+    if (material.has_material) {
+        glMaterialfv(GL_FRONT, GL_AMBIENT, material.Ka);
+        glMaterialfv(GL_FRONT, GL_DIFFUSE, material.Kd);
+        glMaterialfv(GL_FRONT, GL_EMISSION, material.Ke);
+        glMaterialf(GL_FRONT, GL_SHININESS, material.Ns);
+    }
+    else {
+        GLfloat white[3] = { 1.0f, 1.0f, 1.0f };
+        glMaterialfv(GL_FRONT, GL_DIFFUSE, white);
+    }
+
+    glBegin(GL_TRIANGLES);
+    for (int i = 0; i < model.faceCount; i++) {
+        for (int j = 0; j < 3; j++) {
+            int vIndex = model.faces[i][j * 3 + 0];
+            int vtIndex = model.faces[i][j * 3 + 1];
+            int vnIndex = model.faces[i][j * 3 + 2];
+
+            if (vIndex < 0)  vIndex = model.vertexCount + vIndex + 1;
+            if (vtIndex < 0) vtIndex = model.texcoordCount + vtIndex + 1;
+            if (vnIndex < 0) vnIndex = model.normalCount + vnIndex + 1;
+
+            vIndex--; vtIndex--; vnIndex--;
+
+            if (vnIndex >= 0 && vnIndex < model.normalCount)
+                glNormal3fv(model.normals[vnIndex]);
+
+            if (model.texcoordCount > 0 && vtIndex >= 0 && vtIndex < model.texcoordCount)
+                glTexCoord2fv(model.texcoords[vtIndex]);
+
+            if (vIndex >= 0 && vIndex < model.vertexCount)
+                glVertex3fv(model.vertex[vIndex]);
+        }
+    }
+    glEnd();
+
+    glutSwapBuffers();
+
+}
+
+void init() {
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_LIGHTING);
+    glEnable(GL_LIGHT0);
+    glClearColor(0.2f, 0.2f, 0.2f, 1.0f);
+}
+
+void mouseButton(int button, int state, int x, int y) {
+    if (button == GLUT_LEFT_BUTTON) {
+        if (state == GLUT_DOWN) {
+            isDragging = 1;
+            lastMouseX = x;
+            lastMouseY = y;
+        }
+        else {
+            isDragging = 0;
+        }
+    }
+}
+
+void mouseMotion(int x, int y) {
+    if (isDragging) {
+        float dx = (float)(x - lastMouseX);
+        float dy = (float)(y - lastMouseY);
+
+        rotY += dx * 0.5f;
+        rotX += dy * 0.5f;
+
+        lastMouseX = x;
+        lastMouseY = y;
+
+        glutPostRedisplay();
+    }
+}
+
+int main(int argc, char** argv) {
+    const char* base_path = "C:/Users/cezar/OneDrive/Documentos/Faculdade/Computação Gráfica/modelos/";
+    char modelName[50];
+    const char* testedModels[] = {
+        "bunny",
+        "buddha",
+        "serapis",
+        "dragon",
+        NULL 
+    };
+
+    bool isValid = false;
+
+    printf("Modelos Testados Disponiveis:\n");
+    int i = 0;
+    while (testedModels[i] != NULL) {
+        printf("- %s\n", testedModels[i]);
+        i++;
+    }
+    printf("----------------------------------------\n");
+
+
+    while (!isValid) {
+        printf("Digite o nome do modelo: ");
+
+        if (scanf("%49s", modelName) != 1) {
+            int c;
+            while ((c = getchar()) != '\n' && c != EOF);
+            continue;
+        }
+
+        int j = 0;
+        while (testedModels[j] != NULL) {
+            if (strcmp(modelName, testedModels[j]) == 0) {
+                isValid = true;
+                break;
+            }
+            j++;
+        }
+
+        if (!isValid) {
+            printf("\nERRO: Modelo '%s' nao encontrado na lista de testados.\n", modelName);
+            printf("Por favor, digite um dos modelos disponiveis acima.\n\n");
+        }
+    }
+
+    printf("\nSucesso! Modelo '%s' selecionado e validado.\n", modelName);
+    printf("\nCarregando...\n");
+
+    char objPath[256];
+    char mtlPath[256];
+
+    snprintf(
+        objPath,
+        sizeof(objPath),
+        "%s%s/%s.obj",
+        base_path,
+        modelName,
+        modelName
+    );
+    snprintf(
+        mtlPath,
+        sizeof(mtlPath),
+        "%s%s/%s.mtl",
+        base_path,
+        modelName,
+        modelName
+    );
+
+    model = readModel(objPath);
+
+    FILE* test = fopen(mtlPath, "r");
+    if (test) {
+        fclose(test);
+        printf("\nMTL encontrado: %s\n", mtlPath);
+        material = readMTL(mtlPath);
+    }
+    else {
+        printf("\nNenhum arquivo MTL encontrado para %s.\n", modelName);
+    }
+    printf("\nModelo carregado com sucesso\n");
+    printf("Vertices: %d\n", model.vertexCount);
+    printf("Texturas: %d\n", model.texcoordCount);
+    printf("Normais:  %d\n", model.normalCount);
+    printf("Faces:    %d\n", model.faceCount);
+    if (model.texcoordCount == 0)
+        printf("Modelo sem coordenadas de textura!\n");
+
+
+    glutInit(&argc, argv);
+    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
+    glutInitWindowSize(800, 600);
+    glutCreateWindow("Visualizador OBJ");
+
+    init();
+    glutDisplayFunc(display);
+    glutReshapeFunc(reshape);
+    glutMouseFunc(mouseButton);
+    glutMotionFunc(mouseMotion);
+
+    glutMainLoop();
+
+    freeModel(&model);
+    return 0;
+}
