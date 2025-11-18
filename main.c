@@ -19,6 +19,8 @@ static char modelName[50];
 
 
 typedef struct {
+    float center[3];
+    float offset[3];
     float (*vertex)[3];
     float (*texcoords)[2];
     float (*normals)[3];
@@ -40,6 +42,10 @@ typedef struct {
 
 static Model model;
 static Material material;
+
+float camYaw = 0.0f;
+float camPitch = 0.0f;
+float camRadius = 3.0f; 
 
 void freeModel(Model* model) {
     free(model->vertex);
@@ -176,6 +182,32 @@ Model readModel(const char* filename) {
         }
     }
 
+    float minX = 1e9, minY = 1e9, minZ = 1e9;
+    float maxX = -1e9, maxY = -1e9, maxZ = -1e9;
+
+    for (int i = 0; i < model.vertexCount; i++) {
+        float x = model.vertex[i][0];
+        float y = model.vertex[i][1];
+        float z = model.vertex[i][2];
+
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (z < minZ) minZ = z;
+
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+        if (z > maxZ) maxZ = z;
+    }
+
+    model.center[0] = (minX + maxX) * 0.5f;
+    model.center[1] = (minY + maxY) * 0.5f;
+    model.center[2] = (minZ + maxZ) * 0.5f;
+
+    model.offset[0] = 0.0f;
+    model.offset[1] = 0.3f;
+    model.offset[2] = 0.0f;
+
+
     return model;
 }
 
@@ -242,20 +274,17 @@ void display(void) {
     glMaterialfv(GL_FRONT, GL_DIFFUSE, mat_diffuse);
     glMaterialfv(GL_FRONT, GL_SPECULAR, mat_specular);
     glMaterialfv(GL_FRONT, GL_SHININESS, mat_shininess);
+    
+    float camX = model.center[0] + camRadius * cos(camPitch) * sin(camYaw);
+    float camY = model.center[1] + camRadius * sin(camPitch);
+    float camZ = model.center[2] + camRadius * cos(camPitch) * cos(camYaw);
 
-    if (strcmp(modelName, "bunny") == 0) {
-        glTranslatef(0.0f, -0.5f, -3.0f);
-    } else if (strcmp(modelName, "serapis") == 0) {
-        glTranslatef(0.0f, -0.5f, -2.5f);
-    } else if (strcmp(modelName, "buddha") == 0) {
-        glTranslatef(0.0f, 0.0f, -1.5f);
-    } else {
-        glTranslatef(0.0f, 0.0f, -1.5f);
-    }
-
-    glRotatef(rotX, 1.0f, 0.0f, 0.0f);
-    glRotatef(rotY, 0.0f, 1.0f, 0.0f);
-
+    gluLookAt(
+        camX, camY, camZ,
+        model.center[0], model.center[1], model.center[2],
+        0, 1, 0
+    );
+    
     glColor3f(1.0f, 1.0f, 1.0f);
 
     if (material.has_material) {
@@ -285,8 +314,12 @@ void display(void) {
             if (vnIndex >= 0 && vnIndex < model.normalCount)
                 glNormal3fv(model.normals[vnIndex]);
 
-            if (model.texcoordCount > 0 && vtIndex >= 0 && vtIndex < model.texcoordCount)
-                glTexCoord2fv(model.texcoords[vtIndex]);
+            if (model.texcoordCount > 0 && vtIndex >= 0 && vtIndex < model.texcoordCount){
+                glTexCoord2f( 
+                    model.texcoords[ vtIndex ][0],
+                    model.texcoords[ vtIndex ][1]
+                );
+            }
 
             if (vIndex >= 0 && vIndex < model.vertexCount)
                 glVertex3fv(model.vertex[vIndex]);
@@ -298,11 +331,62 @@ void display(void) {
 
 }
 
+GLuint loadTextureBMP(const char* filename) {
+    GLuint textureID;
+    int width, height;
+    unsigned char header[54];
+    unsigned int dataPos, imageSize;
+    unsigned char* data;
+
+    FILE* file = fopen(filename, "rb");
+    if (!file) {
+        printf("Nao foi possivel abrir textura: %s\n", filename);
+        return 0;
+    }
+
+    fread(header, 1, 54, file);
+
+    width  = *(int*)&header[18];
+    height = *(int*)&header[22];
+
+    imageSize = 3 * width * height;
+    dataPos = *(int*)&header[10];
+
+    data = (unsigned char*)malloc(imageSize);
+    fseek(file, dataPos, SEEK_SET);
+    fread(data, 1, imageSize, file);
+    fclose(file);
+
+    glGenTextures(1, &textureID);
+    glBindTexture(GL_TEXTURE_2D, textureID);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    glTexImage2D(
+        GL_TEXTURE_2D, 0, GL_RGB,
+        width, height, 0,
+        GL_BGR, GL_UNSIGNED_BYTE, data
+    );
+
+    free(data);
+    return textureID;
+}
+
+
 void init() {
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_LIGHTING);
     glEnable(GL_LIGHT0);
     glClearColor(0.2f, 0.2f, 0.2f, 1.0f);
+
+    GLuint textureID = 0;
+
+    if (model.texcoordCount > 0) {
+        textureID = loadTextureBMP("default.bmp");
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, textureID);
+    }
 }
 
 void mouseButton(int button, int state, int x, int y) {
@@ -319,24 +403,25 @@ void mouseButton(int button, int state, int x, int y) {
 }
 
 void mouseMotion(int x, int y) {
-    if (isDragging) {
-        float dx = (float)(x - lastMouseX);
-        float dy = (float)(y - lastMouseY);
+    if (!isDragging)
+        return;
 
-        rotY += dx * 0.5f;
-        rotX += dy * 0.5f;
+    int dx = x - lastMouseX;
+    int dy = y - lastMouseY;
 
-        lastMouseX = x;
-        lastMouseY = y;
+    camYaw   -= dx * 0.01f;
+    camPitch += dy * 0.01f;
 
-        glutPostRedisplay();
-    }
+    if (camPitch >  1.5f) camPitch =  1.5f;
+    if (camPitch < -1.5f) camPitch = -1.5f;
+
+    lastMouseX = x;
+    lastMouseY = y;
+
+    glutPostRedisplay();
 }
 
-
-
 int main(int argc, char** argv) {
-    // const char* base_path = "";
     
     const char* testedModels[] = {
         "bunny",

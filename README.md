@@ -2,6 +2,8 @@
 
 **Aluno: Brenno Cezário de Oliveira Pereira**
 
+**Matrícula: 202110035111**
+
 ## Compilar e executar código
 
 `gcc main.c -lglut -lGL -lGLU -lm -o exe`
@@ -26,10 +28,14 @@
 
 **Estrutura de Diretórios:**
 
-1. Baixe os arquivos ZIP dos modelos no endereço: https://casual-effects.com/data/index.html .
+1. Baixe os arquivos ZIP dos modelos no endereço: [https://casual-effects.com/data/index.html](https://casual-effects.com/data/index.html) .
 
-2. Coloque os arquivos ZIP no mesmo diretório que o seu código-fonte (`main.c`).
+2. Coloque os arquivos ZIP no mesmo diretório que o código-fonte (`main.c`).
 
 3. Extraia todos os arquivos ZIP nesse diretório.
 
-**Importante:** O código espera que o arquivo do modelo desejado esteja diretamente no mesmo diretório que o arquivo `main.c`.
+**Textura:**
+
+Para os modelos que possuem parâmetros de textura (Coelho de Stanford), faça o download de um arquivo bitmap (BMP) e então coloque no mesmo diretório do código-fonte (`main.c`). Há um exemplo no repositório do github: [https://github.com/BrennoCezario/obj-viewer](https://github.com/BrennoCezario/obj-viewer)
+
+**Importante:** O código espera que os arquivos do modelo e da textura estejam diretamente no mesmo diretório que o arquivo `main.c`.
