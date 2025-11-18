@@ -4,12 +4,10 @@
 
 **Matrícula: 202110035111**
 
-## Construir executável
+## Compilar e executar código
 
-**Compilar arquivo:**
-`gcc main.c -o exe -lglut -lGL -lGLU`
+`gcc main.c -lglut -lGL -lGLU -lm -o exe`
 
-**Executar arquivo gerado:**
 `./exe`
 
 ## Modelos utilizados
@@ -26,16 +24,14 @@
 - OpenGL (-lGL)
 - GLU (-lGLU)
 
-3. Fazer download dos modelos utilizados no endereço: https://casual-effects.com/data/index.html 
-
 ## Observação
 
 **Estrutura de Diretórios:**
 
-1. Baixe os arquivos ZIP dos modelos.
+1. Baixe os arquivos ZIP dos modelos no endereço: https://casual-effects.com/data/index.html .
 
 2. Coloque os arquivos ZIP no mesmo diretório que o seu código-fonte (`main.c`).
 
 3. Extraia todos os arquivos ZIP nesse diretório.
 
-**Importante:** O código espera que as pastas dos modelos (ex: `bunny`, que contém `bunny.obj`) estejam diretamente no mesmo diretório que o arquivo `main.c`.
+**Importante:** O código espera que o arquivo do modelo desejado esteja diretamente no mesmo diretório que o arquivo `main.c`.
