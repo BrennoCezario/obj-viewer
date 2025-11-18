@@ -2,8 +2,6 @@
 
 **Aluno: Brenno Cezário de Oliveira Pereira**
 
-**Matrícula: 202110035111**
-
 ## Compilar e executar código
 
 `gcc main.c -lglut -lGL -lGLU -lm -o exe`
